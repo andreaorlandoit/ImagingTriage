@@ -80,13 +80,16 @@ class ImageProcessorUI:
                 try:
                     tree = ET.parse(xmp_path)
                     root = tree.getroot()
-                    rating_element = root.find('.//{http://ns.adobe.com/xap/1.0/}Rating')
-                    if rating_element is not None:
-                        rating_value = rating_element.text
+                    # Trova l'elemento rdf:Description che contiene l'attributo xmp:Rating
+                    rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+
+                    if rdf_description is not None:
+                        rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
                         subfolder_name = f"RATING_{rating_value}"
                         destination_folder = os.path.join(folder_to_process, subfolder_name)
                         os.makedirs(destination_folder, exist_ok=True)
                         shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+                        shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
                         processed_count += 1
                 except FileNotFoundError:
                     messagebox.showerror("Errore", f"File XMP non trovato: {xmp_path}")
