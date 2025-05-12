@@ -21,7 +21,7 @@ import sys  # Importa il modulo sys per gestire gli argomenti da riga di comando
 class ImageProcessorUI:
     def __init__(self, master, initial_folder=None):
         self.master = master
-        master.title("Elabora Immagini ARW")
+        master.title("Elabora Immagini ARW :: Suddivisione in sotto-cartelle per Rating")
         master.geometry("800x120")
         master.resizable(False, False)
 
@@ -40,11 +40,11 @@ class ImageProcessorUI:
         self.button_browse.grid(row=0, column=2, padx=5, pady=10, sticky="e")
 
         # Riga 2: Buttons
-        self.button_cancel = tk.Button(master, text="Annulla", command=master.quit)
-        self.button_cancel.grid(row=1, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
-
         self.button_process = tk.Button(master, text="Elabora", command=self.process_folder)
-        self.button_process.grid(row=1, column=2, padx=5, pady=10, sticky="ew")
+        self.button_process.grid(row=1, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
+
+        self.button_cancel = tk.Button(master, text="Annulla", command=master.quit)
+        self.button_cancel.grid(row=1, column=2, padx=5, pady=10, sticky="ew")
 
         # Configurazione del layout per far espandere l'Entry
         master.grid_columnconfigure(1, weight=1)
