@@ -1,9 +1,9 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """
 Nome del Programma: elabora_arw.py
-Versione: 2025-05-11
+Versione: 2025-06-27
 Autore: Andrea Orlando
 Scopo: Questo script analizza una cartella contenente file .ARW e .XMP,
        estrae il valore del rating dai file .XMP e sposta i file .ARW
@@ -16,7 +16,62 @@ from tkinter import filedialog, messagebox
 import os
 import xml.etree.ElementTree as ET
 import shutil
-import sys  # Importa il modulo sys per gestire gli argomenti da riga di comando
+import sys
+
+def process_directory(folder_to_process):
+    """
+    Analizza una cartella, legge i rating dai file XMP e sposta i file ARW e XMP
+    corrispondenti in sottocartelle basate sul rating.
+
+    Args:
+        folder_to_process (str): Il percorso della cartella da elaborare.
+
+    Returns:
+        dict: Un dizionario con i risultati dell'elaborazione.
+              Contiene "processed_count", "errors" e un messaggio di riepilogo.
+    """
+    if not os.path.isdir(folder_to_process):
+        return {"processed_count": 0, "errors": ["La cartella specificata non esiste."], "message": "Errore: cartella non trovata."}
+
+    arw_files = {}
+    xmp_files = {}
+    errors = []
+    processed_count = 0
+
+    # Scansiona la cartella per file .ARW e .XMP
+    for filename in os.listdir(folder_to_process):
+        if filename.lower().endswith(".arw"):
+            base_name, _ = os.path.splitext(filename)
+            arw_files[base_name] = os.path.join(folder_to_process, filename)
+        elif filename.lower().endswith(".xmp"):
+            base_name, _ = os.path.splitext(filename)
+            xmp_files[base_name] = os.path.join(folder_to_process, filename)
+
+    for base_name, arw_path in arw_files.items():
+        if base_name in xmp_files:
+            xmp_path = xmp_files[base_name]
+            try:
+                tree = ET.parse(xmp_path)
+                root = tree.getroot()
+                rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+
+                if rdf_description is not None:
+                    rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
+                    if rating_value is not None:
+                        subfolder_name = f"RATING_{rating_value}"
+                        destination_folder = os.path.join(folder_to_process, subfolder_name)
+                        os.makedirs(destination_folder, exist_ok=True)
+                        shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+                        shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                        processed_count += 1
+            except FileNotFoundError:
+                errors.append(f"File XMP non trovato: {xmp_path}")
+            except ET.ParseError:
+                errors.append(f"Errore di parsing nel file XMP: {xmp_path}")
+
+    message = f"Elaborazione completata. Spostati {processed_count} file ARW."
+    return {"processed_count": processed_count, "errors": errors, "message": message}
+
 
 class ImageProcessorUI:
     def __init__(self, master, initial_folder=None):
@@ -46,7 +101,6 @@ class ImageProcessorUI:
         self.button_cancel = tk.Button(master, text="Annulla", command=master.quit)
         self.button_cancel.grid(row=1, column=2, padx=5, pady=10, sticky="ew")
 
-        # Configurazione del layout per far espandere l'Entry
         master.grid_columnconfigure(1, weight=1)
 
     def browse_folder(self):
@@ -57,48 +111,18 @@ class ImageProcessorUI:
 
     def process_folder(self):
         folder_to_process = self.folder_path.get()
-        if not os.path.isdir(folder_to_process):
-            messagebox.showerror("Errore", "La cartella specificata non esiste.")
-            return
+        
+        # Chiama la funzione logica separata
+        result = process_directory(folder_to_process)
 
-        arw_files = {}
-        xmp_files = {}
+        # Gestisce gli errori e mostra un report
+        if result["errors"]:
+            error_message = "Si sono verificati i seguenti errori:\n\n" + "\n".join(result["errors"])
+            messagebox.showwarning("Errori durante l'elaborazione", error_message)
 
-        # Scansiona la cartella per file .ARW e .XMP
-        for filename in os.listdir(folder_to_process):
-            if filename.lower().endswith(".arw"):
-                base_name, _ = os.path.splitext(filename)
-                arw_files[base_name] = os.path.join(folder_to_process, filename)
-            elif filename.lower().endswith(".xmp"):
-                base_name, _ = os.path.splitext(filename)
-                xmp_files[base_name] = os.path.join(folder_to_process, filename)
-
-        processed_count = 0
-        for base_name, arw_path in arw_files.items():
-            if base_name in xmp_files:
-                xmp_path = xmp_files[base_name]
-                try:
-                    tree = ET.parse(xmp_path)
-                    root = tree.getroot()
-                    # Trova l'elemento rdf:Description che contiene l'attributo xmp:Rating
-                    rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
-
-                    if rdf_description is not None:
-                        rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
-                        subfolder_name = f"RATING_{rating_value}"
-                        destination_folder = os.path.join(folder_to_process, subfolder_name)
-                        os.makedirs(destination_folder, exist_ok=True)
-                        shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
-                        shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
-                        processed_count += 1
-                except FileNotFoundError:
-                    messagebox.showerror("Errore", f"File XMP non trovato: {xmp_path}")
-                except ET.ParseError:
-                    messagebox.showerror("Errore", f"Errore durante la lettura del file XMP: {xmp_path}")
-
-        message = f"Elaborazione completata. Spostati {processed_count} file ARW."
-        messagebox.showinfo("Completato", message)
-        self.master.destroy()
+        # Mostra il messaggio di completamento
+        messagebox.showinfo("Completato", result["message"])
+        # self.master.destroy() # Commentato per permettere elaborazioni multiple
 
 if __name__ == "__main__":
     initial_folder = None
