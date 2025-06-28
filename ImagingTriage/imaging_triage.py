@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-
+"""
 Program Name: ImagingTriage
 Version: 2025-06-27
 Author: Andrea Orlando
@@ -9,7 +9,7 @@ Purpose: This script analyzes a folder containing image files and their .XMP sid
          extracts rating and color label metadata, and moves the files into
          subfolders. It supports configurable file types.
 License: GPLv3
-
+"""
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -25,6 +25,7 @@ from collections import defaultdict
 # --- Configuration Management ---
 CONFIG_FILE = "config.xml"
 DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
+APP_VERSION = "2025.06.28.0"
 
 def get_script_directory():
     """Returns the directory where the script is located."""
@@ -330,7 +331,7 @@ class ImageProcessorUI:
         self.master = master
         self.lang = lang_manager
         self.config = config
-        master.title(self.lang.get("app_title"))
+        master.title(self.lang.get("app_title", app_version=APP_VERSION))
         master.geometry("800x240")
         master.resizable(False, False)
 
@@ -410,12 +411,12 @@ class ImageProcessorUI:
 
     def start_processing(self):
         if self.processing_thread and self.processing_thread.is_alive():
-            messagebox.showwarning(self.lang.get("app_title"), self.lang.get("warning_already_running"))
+            messagebox.showwarning(self.lang.get("app_title", app_version=APP_VERSION), self.lang.get("warning_already_running"))
             return
 
         folder_to_process = self.folder_path.get()
         if not os.path.isdir(folder_to_process):
-            messagebox.showerror(self.lang.get("app_title"), self.lang.get("error_folder_not_exists"))
+            messagebox.showerror(self.lang.get("app_title", app_version=APP_VERSION), self.lang.get("error_folder_not_exists"))
             return
 
         self.button_process.config(state="disabled")

@@ -21,7 +21,16 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="elabora_arw.py" />
+    <Compile Include="imaging_triage.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="lang\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="compila.bat" />
+    <Content Include="config.xml" />
+    <Content Include="lang\en.json" />
+    <Content Include="lang\it.json" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
