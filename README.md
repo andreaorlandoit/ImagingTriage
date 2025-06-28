@@ -25,10 +25,9 @@ This project is licensed under the GPLv3 License. See the `LICENSE` file for mor
 ### Running the Application:
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/YOUR_USERNAME/ImagingTriage.git
+    git clone https://github.com/andreaorlandoit/ImagingTriage.git
     cd ImagingTriage
     ```
-    (Replace `YOUR_USERNAME` with your actual GitHub username and `ImagingTriage.git` with your repository URL)
 
 2.  **Navigate to the application directory:**
     ```bash
