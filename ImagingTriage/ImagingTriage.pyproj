@@ -24,13 +24,22 @@
     <Compile Include="imaging_triage.py" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="docs\" />
     <Folder Include="lang\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="build.bat" />
     <Content Include="config.xml" />
+    <Content Include="docs\help_en.html" />
+    <Content Include="docs\help_it.html" />
+    <Content Include="ImagingTriage.ico" />
+    <Content Include="ImagingTriage.jpeg" />
+    <Content Include="ImagingTriage.xcf" />
+    <Content Include="imaging_triage.spec" />
     <Content Include="lang\en.json" />
     <Content Include="lang\it.json" />
+    <Content Include="LICENSE" />
+    <Content Include="README.md" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
