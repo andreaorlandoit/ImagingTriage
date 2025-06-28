@@ -21,7 +21,6 @@ import sys
 import threading
 import json
 import subprocess
-import re
 from collections import defaultdict
 
 # --- Configuration Management ---
@@ -112,7 +111,7 @@ def gather_files_back(folder_to_process, progress_callback=None):
             
     return stats
 
-def process_directory(folder_to_process, progress_callback=None):
+def process_directory(folder_to_process, inhibit_move_unrated, progress_callback=None):
     """
     Analyzes a folder, reads ratings and labels from XMP files, and moves the
     corresponding ARW and XMP files into subfolders.
@@ -121,6 +120,7 @@ def process_directory(folder_to_process, progress_callback=None):
         "total_arw": 0,
         "processed_count": 0,
         "moved_to_missing": 0,
+        "intentionally_ignored": 0,
         "unclassified_no_xmp": 0,
         "unclassified_no_metadata": 0,
         "folder_distribution": defaultdict(int),
@@ -149,50 +149,63 @@ def process_directory(folder_to_process, progress_callback=None):
         if progress_callback:
             progress_callback(i + 1, stats["total_arw"])
 
-        if base_name not in xmp_files:
-            stats["unclassified_no_xmp"] += 1
-            os.makedirs(missing_folder, exist_ok=True)
-            shutil.move(arw_path, os.path.join(missing_folder, os.path.basename(arw_path)))
-            stats["moved_to_missing"] += 1
-            continue
+        is_rated = False
+        rating_value = None
+        label_value = None
 
-        xmp_path = xmp_files[base_name]
-        try:
-            tree = ET.parse(xmp_path)
-            root = tree.getroot()
-            rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+        if base_name in xmp_files:
+            xmp_path = xmp_files[base_name]
+            try:
+                tree = ET.parse(xmp_path)
+                root = tree.getroot()
+                rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
 
-            rating_value = None
-            label_value = None
-            if rdf_description is not None:
-                rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
-                label_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
+                if rdf_description is not None:
+                    rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
+                    label_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
 
+                    # A file is considered rated if it has a rating > 0 or a label other than 'None'
+                    if (rating_value and rating_value != '0') or \
+                       (label_value and label_value.lower() != 'none'):
+                        is_rated = True
+
+            except (FileNotFoundError, ET.ParseError) as e:
+                stats["errors"].append(f"Error processing {os.path.basename(xmp_path)}: {e}")
+                is_rated = False # Treat as unrated if XMP is broken
+        
+        if is_rated:
             folder_parts = []
-            if rating_value:
+            if rating_value and rating_value != '0':
                 folder_parts.append(f"RATING_{rating_value}")
-            if label_value:
+            if label_value and label_value.lower() != 'none':
                 folder_parts.append(f"LABEL_{label_value}")
-
-            if folder_parts:
-                subfolder_name = "-".join(folder_parts)
-                destination_folder = os.path.join(folder_to_process, subfolder_name)
-                os.makedirs(destination_folder, exist_ok=True)
-                shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
-                shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
-                stats["processed_count"] += 1
-                stats["folder_distribution"][subfolder_name] += 1
+            
+            subfolder_name = "-".join(folder_parts)
+            destination_folder = os.path.join(folder_to_process, subfolder_name)
+            os.makedirs(destination_folder, exist_ok=True)
+            
+            shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+            if base_name in xmp_files:
+                shutil.move(xmp_files[base_name], os.path.join(destination_folder, os.path.basename(xmp_files[base_name])))
+            
+            stats["processed_count"] += 1
+            stats["folder_distribution"][subfolder_name] += 1
+        else:
+            # File is unrated (no XMP, or XMP has rating 0 and label None)
+            if base_name not in xmp_files:
+                stats["unclassified_no_xmp"] += 1
             else:
                 stats["unclassified_no_metadata"] += 1
-                os.makedirs(missing_folder, exist_ok=True)
-                shutil.move(arw_path, os.path.join(missing_folder, os.path.basename(arw_path)))
-                shutil.move(xmp_path, os.path.join(missing_folder, os.path.basename(xmp_path)))
-                stats["moved_to_missing"] += 1
 
-        except FileNotFoundError:
-            stats["errors"].append(f"File XMP not found (after initial scan): {xmp_path}")
-        except ET.ParseError:
-            stats["errors"].append(f"Error parsing XMP file: {xmp_path}")
+            if inhibit_move_unrated:
+                stats["intentionally_ignored"] += 1
+                continue
+            
+            os.makedirs(missing_folder, exist_ok=True)
+            shutil.move(arw_path, os.path.join(missing_folder, os.path.basename(arw_path)))
+            if base_name in xmp_files:
+                shutil.move(xmp_files[base_name], os.path.join(missing_folder, os.path.basename(xmp_files[base_name])))
+            stats["moved_to_missing"] += 1
 
     return stats
 
@@ -281,7 +294,7 @@ class ImageProcessorUI:
         self.master = master
         self.lang = lang_manager
         master.title(self.lang.get("app_title"))
-        master.geometry("800x250") # Increased height for the new checkbox
+        master.geometry("800x280") # Increased height for the new checkbox
         master.resizable(False, False)
 
         self.folder_path = tk.StringVar()
@@ -289,6 +302,7 @@ class ImageProcessorUI:
             self.folder_path.set(initial_folder)
         
         self.gather_mode = tk.BooleanVar()
+        self.inhibit_move_mode = tk.BooleanVar()
         self.processing_thread = None
 
         # --- UI Widgets ---
@@ -315,15 +329,24 @@ class ImageProcessorUI:
         self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(5,0))
 
-        # --- Gather Mode Checkbox ---
-        gather_frame = ttk.Frame(master, padding=(10,0,10,10))
-        gather_frame.grid(row=2, column=0, sticky="w")
+        # --- Options Frame ---
+        options_frame = ttk.Frame(master, padding=(10,0,10,10))
+        options_frame.grid(row=2, column=0, sticky="w")
+        
         self.gather_checkbox = ttk.Checkbutton(
-            gather_frame, 
+            options_frame, 
             text=self.lang.get("gather_checkbox_label"), 
-            variable=self.gather_mode
+            variable=self.gather_mode,
+            command=self.toggle_options
         )
-        self.gather_checkbox.pack(side="left")
+        self.gather_checkbox.pack(side="top", anchor="w")
+
+        self.inhibit_move_checkbox = ttk.Checkbutton(
+            options_frame, 
+            text=self.lang.get("inhibit_move_checkbox_label"), 
+            variable=self.inhibit_move_mode
+        )
+        self.inhibit_move_checkbox.pack(side="top", anchor="w", pady=(5,0))
 
         # --- Main Buttons ---
         button_frame = ttk.Frame(master, padding="10")
@@ -343,6 +366,13 @@ class ImageProcessorUI:
         self.button_cancel.pack(side="left")
 
         master.columnconfigure(0, weight=1)
+
+    def toggle_options(self):
+        """Disables the 'inhibit move' checkbox if 'gather mode' is active."""
+        if self.gather_mode.get():
+            self.inhibit_move_checkbox.config(state="disabled")
+        else:
+            self.inhibit_move_checkbox.config(state="normal")
 
     def open_config(self):
         ConfigWindow(self.master, self.lang)
@@ -367,25 +397,24 @@ class ImageProcessorUI:
         self.button_browse.config(state="disabled")
         self.button_config.config(state="disabled")
         self.gather_checkbox.config(state="disabled")
+        self.inhibit_move_checkbox.config(state="disabled")
         self.progress_bar["value"] = 0
         
-        # Decide which logic to run based on the checkbox
         if self.gather_mode.get():
             target_function = self.run_gather_logic
+            args = (folder_to_process,)
         else:
             target_function = self.run_processing_logic
+            args = (folder_to_process, self.inhibit_move_mode.get())
 
-        self.processing_thread = threading.Thread(
-            target=target_function,
-            args=(folder_to_process,)
-        )
+        self.processing_thread = threading.Thread(target=target_function, args=args)
         self.processing_thread.start()
 
-    def run_processing_logic(self, folder_path):
+    def run_processing_logic(self, folder_path, inhibit_move):
         def progress_handler(current, total):
             self.master.after(0, self.update_progress, current, total)
 
-        result_stats = process_directory(folder_path, progress_handler)
+        result_stats = process_directory(folder_path, inhibit_move, progress_handler)
         self.master.after(0, self.on_processing_complete, result_stats)
 
     def run_gather_logic(self, folder_path):
@@ -409,6 +438,8 @@ class ImageProcessorUI:
         report.append(self.lang.get("report_total_arw", count=stats['total_arw']))
         report.append(self.lang.get("report_moved_rated", count=stats['processed_count']))
         report.append(self.lang.get("report_moved_missing", count=stats['moved_to_missing']))
+        if stats['intentionally_ignored'] > 0:
+            report.append(self.lang.get("report_intentionally_ignored", count=stats['intentionally_ignored']))
         report.append("")
         report.append(self.lang.get("report_ignored_header"))
         report.append(self.lang.get("report_ignored_no_xmp", count=stats['unclassified_no_xmp']))
@@ -448,6 +479,8 @@ class ImageProcessorUI:
         self.button_browse.config(state="normal")
         self.button_config.config(state="normal")
         self.gather_checkbox.config(state="normal")
+        self.inhibit_move_checkbox.config(state="normal")
+        self.toggle_options() # Ensure inhibit checkbox is correctly enabled/disabled
         self.progress_bar["value"] = 100
         self.status_label.config(text=self.lang.get("status_complete"))
         self.master.after(2000, lambda: self.status_label.config(text=self.lang.get("status_ready")))

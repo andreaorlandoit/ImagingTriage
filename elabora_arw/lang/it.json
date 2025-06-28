@@ -31,5 +31,7 @@
   "gather_report_header": "--- Report di Raccolta ---",
   "gather_report_moved": "File spostati nella cartella principale: {count}",
   "gather_report_deleted": "Sottocartelle rimosse: {count}",
-  "gather_error_conflict": "Il file esiste già nella cartella principale, non è stato spostato: {filename}"
+  "gather_error_conflict": "Il file esiste già nella cartella principale, non è stato spostato: {filename}",
+  "inhibit_move_checkbox_label": "Non spostare i file privi di valutazione",
+  "report_intentionally_ignored": "File lasciati intenzionalmente nella cartella: {count}"
 }
