@@ -5,7 +5,7 @@ a = Analysis(
     ['imaging_triage.py'],
     pathex=[],
     binaries=[],
-    datas=[('lang', 'lang')],
+    datas=[('lang', 'lang'), ('docs', 'docs')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

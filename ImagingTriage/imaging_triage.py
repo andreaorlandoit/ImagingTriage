@@ -29,7 +29,9 @@ DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
 APP_VERSION = "2025.06.28.0"
 
 def get_script_directory():
-    """Returns the directory where the script is located."""
+    """Returns the directory where the script is located, handling PyInstaller's _MEIPASS."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return sys._MEIPASS
     return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 def load_configuration():
