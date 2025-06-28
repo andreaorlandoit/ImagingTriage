@@ -27,7 +27,7 @@
     <Folder Include="lang\" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="compila.bat" />
+    <Content Include="build.bat" />
     <Content Include="config.xml" />
     <Content Include="lang\en.json" />
     <Content Include="lang\it.json" />
