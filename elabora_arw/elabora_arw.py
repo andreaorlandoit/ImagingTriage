@@ -7,7 +7,8 @@ Version: 2025-06-27
 Author: Andrea Orlando
 Purpose: This script analyzes a folder containing .ARW and .XMP files,
          extracts rating and color label from the .XMP files, and moves the
-         files into subfolders based on this metadata.
+         files into subfolders based on this metadata. It can also undo
+         the operation, gathering files back to the main folder.
 License: GPLv3
 """
 
@@ -20,6 +21,7 @@ import sys
 import threading
 import json
 import subprocess
+import re
 from collections import defaultdict
 
 # --- Configuration Management ---
@@ -71,6 +73,45 @@ class LanguageManager:
         return self.strings.get(key, key).format(**kwargs)
 
 # --- Core Logic ---
+def gather_files_back(folder_to_process, progress_callback=None):
+    """Gathers files from subfolders back to the main folder and removes empty subfolders."""
+    stats = {
+        "moved_count": 0,
+        "deleted_folders": 0,
+        "errors": []
+    }
+    
+    subfolders = [d for d in os.listdir(folder_to_process) 
+                  if os.path.isdir(os.path.join(folder_to_process, d)) and 
+                  (d.startswith("RATING_") or d.startswith("LABEL_"))]
+
+    total_files_to_move = 0
+    for subfolder in subfolders:
+        total_files_to_move += len(os.listdir(os.path.join(folder_to_process, subfolder)))
+
+    moved_files_count = 0
+    for subfolder_name in subfolders:
+        subfolder_path = os.path.join(folder_to_process, subfolder_name)
+        for filename in os.listdir(subfolder_path):
+            source_path = os.path.join(subfolder_path, filename)
+            dest_path = os.path.join(folder_to_process, filename)
+
+            if os.path.exists(dest_path):
+                stats["errors"].append(f"{filename}")
+                continue
+
+            shutil.move(source_path, dest_path)
+            stats["moved_count"] += 1
+            moved_files_count += 1
+            if progress_callback:
+                progress_callback(moved_files_count, total_files_to_move)
+
+        if not os.listdir(subfolder_path):
+            os.rmdir(subfolder_path)
+            stats["deleted_folders"] += 1
+            
+    return stats
+
 def process_directory(folder_to_process, progress_callback=None):
     """
     Analyzes a folder, reads ratings and labels from XMP files, and moves the
@@ -240,15 +281,17 @@ class ImageProcessorUI:
         self.master = master
         self.lang = lang_manager
         master.title(self.lang.get("app_title"))
-        master.geometry("800x220")
+        master.geometry("800x250") # Increased height for the new checkbox
         master.resizable(False, False)
 
         self.folder_path = tk.StringVar()
         if initial_folder:
             self.folder_path.set(initial_folder)
         
+        self.gather_mode = tk.BooleanVar()
         self.processing_thread = None
 
+        # --- UI Widgets ---
         input_frame = ttk.Frame(master, padding="10")
         input_frame.grid(row=0, column=0, sticky="ew")
         input_frame.columnconfigure(1, weight=1)
@@ -272,8 +315,19 @@ class ImageProcessorUI:
         self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(5,0))
 
+        # --- Gather Mode Checkbox ---
+        gather_frame = ttk.Frame(master, padding=(10,0,10,10))
+        gather_frame.grid(row=2, column=0, sticky="w")
+        self.gather_checkbox = ttk.Checkbutton(
+            gather_frame, 
+            text=self.lang.get("gather_checkbox_label"), 
+            variable=self.gather_mode
+        )
+        self.gather_checkbox.pack(side="left")
+
+        # --- Main Buttons ---
         button_frame = ttk.Frame(master, padding="10")
-        button_frame.grid(row=2, column=0, sticky="ew")
+        button_frame.grid(row=3, column=0, sticky="ew")
         button_frame.columnconfigure(0, weight=1)
 
         self.button_process = ttk.Button(button_frame, text=self.lang.get("process_button"), command=self.start_processing)
@@ -312,10 +366,17 @@ class ImageProcessorUI:
         self.button_process.config(state="disabled")
         self.button_browse.config(state="disabled")
         self.button_config.config(state="disabled")
+        self.gather_checkbox.config(state="disabled")
         self.progress_bar["value"] = 0
         
+        # Decide which logic to run based on the checkbox
+        if self.gather_mode.get():
+            target_function = self.run_gather_logic
+        else:
+            target_function = self.run_processing_logic
+
         self.processing_thread = threading.Thread(
-            target=self.run_processing_logic,
+            target=target_function,
             args=(folder_to_process,)
         )
         self.processing_thread.start()
@@ -327,6 +388,13 @@ class ImageProcessorUI:
         result_stats = process_directory(folder_path, progress_handler)
         self.master.after(0, self.on_processing_complete, result_stats)
 
+    def run_gather_logic(self, folder_path):
+        def progress_handler(current, total):
+            self.master.after(0, self.update_progress, current, total)
+
+        result_stats = gather_files_back(folder_path, progress_handler)
+        self.master.after(0, self.on_gather_complete, result_stats)
+
     def update_progress(self, current, total):
         if total > 0:
             percentage = (current / total) * 100
@@ -335,12 +403,7 @@ class ImageProcessorUI:
         self.master.update_idletasks()
 
     def on_processing_complete(self, stats):
-        self.button_process.config(state="normal")
-        self.button_browse.config(state="normal")
-        self.button_config.config(state="normal")
-        self.progress_bar["value"] = 100
-        self.status_label.config(text=self.lang.get("status_complete"))
-
+        self.reset_ui_state()
         report = []
         report.append(self.lang.get("report_header"))
         report.append(self.lang.get("report_total_arw", count=stats['total_arw']))
@@ -364,8 +427,31 @@ class ImageProcessorUI:
             report.append(error_list)
         
         ReportWindow(self.master, self.lang.get("report_title"), "\n".join(report))
-        self.status_label.config(text=self.lang.get("status_ready"))
-        self.progress_bar["value"] = 0
+
+    def on_gather_complete(self, stats):
+        self.reset_ui_state()
+        report = []
+        report.append(self.lang.get("gather_report_header"))
+        report.append(self.lang.get("gather_report_moved", count=stats['moved_count']))
+        report.append(self.lang.get("gather_report_deleted", count=stats['deleted_folders']))
+
+        if stats["errors"]:
+            error_list = "\n".join([f"- {self.lang.get('gather_error_conflict', filename=e)}" for e in stats["errors"]])
+            report.append(self.lang.get("report_errors_header"))
+            report.append(error_list)
+
+        ReportWindow(self.master, self.lang.get("gather_report_title"), "\n".join(report))
+
+    def reset_ui_state(self):
+        """Resets the UI to its initial, ready state after an operation."""
+        self.button_process.config(state="normal")
+        self.button_browse.config(state="normal")
+        self.button_config.config(state="normal")
+        self.gather_checkbox.config(state="normal")
+        self.progress_bar["value"] = 100
+        self.status_label.config(text=self.lang.get("status_complete"))
+        self.master.after(2000, lambda: self.status_label.config(text=self.lang.get("status_ready")))
+        self.master.after(2000, lambda: self.progress_bar.config(value=0))
 
 if __name__ == "__main__":
     config = load_configuration()

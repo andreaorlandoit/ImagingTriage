@@ -25,5 +25,11 @@
   "config_window_title": "Configuration",
   "config_language_label": "Application Language:",
   "config_save_button": "Save and Restart",
-  "config_restart_notice": "The application needs to be restarted to apply language changes."
+  "config_restart_notice": "The application needs to be restarted to apply language changes.",
+  "gather_checkbox_label": "Gather files back from subfolders (Undo)",
+  "gather_report_title": "Gather Operation Complete",
+  "gather_report_header": "--- Gather Report ---",
+  "gather_report_moved": "Files moved back to main folder: {count}",
+  "gather_report_deleted": "Subfolders removed: {count}",
+  "gather_error_conflict": "File already exists in the main folder, was not moved: {filename}"
 }
