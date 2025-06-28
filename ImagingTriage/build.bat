@@ -8,7 +8,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Building ImagingTriage.exe...
-python -m PyInstaller -i ImagingTriage.ico imaging_triage.py --onefile --noconsole --add-data "lang:lang"
+python -m PyInstaller -i ImagingTriage.ico imaging_triage.py --onefile --noconsole --add-data "lang;lang" --add-data "docs;docs"
 if %errorlevel% neq 0 (
     echo PyInstaller build failed!
     pause

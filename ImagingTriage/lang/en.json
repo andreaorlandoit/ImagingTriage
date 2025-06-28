@@ -34,5 +34,7 @@
   "gather_error_conflict": "File already exists in the main folder, was not moved: {filename}",
   "inhibit_move_checkbox_label": "Do not move unrated files",
   "report_intentionally_ignored": "Files intentionally left in the main folder: {count}",
-  "config_extensions_label": "Supported file extensions (comma-separated):"
+  "config_extensions_label": "Supported file extensions (comma-separated):",
+  "help_button": "Help",
+  "error_help_file_not_found": "Help file not found: {filename}. Please ensure it exists in the 'docs' folder."
 }

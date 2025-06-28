@@ -34,5 +34,7 @@
   "gather_error_conflict": "Il file esiste già nella cartella principale, non è stato spostato: {filename}",
   "inhibit_move_checkbox_label": "Non spostare i file privi di valutazione",
   "report_intentionally_ignored": "File lasciati intenzionalmente nella cartella: {count}",
-  "config_extensions_label": "Estensioni file supportate (separate da virgola):"
+  "config_extensions_label": "Estensioni file supportate (separate da virgola):",
+  "help_button": "Guida",
+  "error_help_file_not_found": "File di guida non trovato: {filename}. Assicurati che esista nella cartella 'docs'."
 }

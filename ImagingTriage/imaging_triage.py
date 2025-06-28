@@ -20,6 +20,7 @@ import sys
 import threading
 import json
 import subprocess
+import webbrowser
 from collections import defaultdict
 
 # --- Configuration Management ---
@@ -389,6 +390,9 @@ class ImageProcessorUI:
         self.button_config = ttk.Button(action_frame, text=self.lang.get("config_button"), command=self.open_config)
         self.button_config.pack(side="left", padx=(10, 5))
 
+        self.button_help = ttk.Button(action_frame, text=self.lang.get("help_button"), command=self.open_help)
+        self.button_help.pack(side="left", padx=(0, 5))
+
         self.button_cancel = ttk.Button(action_frame, text=self.lang.get("exit_button"), command=master.quit)
         self.button_cancel.pack(side="left")
 
@@ -402,6 +406,24 @@ class ImageProcessorUI:
 
     def open_config(self):
         ConfigWindow(self.master, self.lang, self.config)
+
+    def open_help(self):
+        current_lang = self.config['language']
+        help_file_name = f"help_{current_lang}.html"
+        
+        # In PyInstaller, files added with --add-data are available via sys._MEIPASS
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # Running in a PyInstaller bundle
+            help_path = os.path.join(sys._MEIPASS, "docs", help_file_name)
+        else:
+            # Running in a normal Python environment
+            help_path = os.path.join(get_script_directory(), "docs", help_file_name)
+
+        if os.path.exists(help_path):
+            webbrowser.open_new_tab(f"file:///{help_path}")
+        else:
+            messagebox.showerror(self.lang.get("app_title", app_version=APP_VERSION), 
+                                 self.lang.get("error_help_file_not_found", filename=help_file_name))
 
     def browse_folder(self):
         initial_dir = os.path.join(os.path.expanduser("~"), "Pictures")
