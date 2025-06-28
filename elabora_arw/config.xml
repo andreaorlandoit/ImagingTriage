@@ -1,2 +1,2 @@
 <?xml version='1.0' encoding='utf-8'?>
-<config version="1.0"><language>it</language></config>
+<config version="1.1"><language>it</language><supported_extensions>arw,arq,axr,jpg,jpeg,tif,tiff,heif</supported_extensions></config>

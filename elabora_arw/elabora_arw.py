@@ -5,10 +5,9 @@
 Program Name: elabora_arw.py
 Version: 2025-06-27
 Author: Andrea Orlando
-Purpose: This script analyzes a folder containing .ARW and .XMP files,
-         extracts rating and color label from the .XMP files, and moves the
-         files into subfolders based on this metadata. It can also undo
-         the operation, gathering files back to the main folder.
+Purpose: This script analyzes a folder containing image files and their .XMP sidecars,
+         extracts rating and color label metadata, and moves the files into
+         subfolders. It supports configurable file types.
 License: GPLv3
 """
 
@@ -25,33 +24,60 @@ from collections import defaultdict
 
 # --- Configuration Management ---
 CONFIG_FILE = "config.xml"
+DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
 
 def get_script_directory():
     """Returns the directory where the script is located."""
     return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 def load_configuration():
-    """Loads configuration from config.xml. If it doesn't exist, creates it."""
+    """Loads configuration from config.xml. Returns defaults if not found or invalid."""
     config_path = os.path.join(get_script_directory(), CONFIG_FILE)
+    config = {"language": "en", "extensions": DEFAULT_EXTENSIONS}
     try:
         tree = ET.parse(config_path)
         root = tree.getroot()
-        lang = root.find("language").text
-        return {"language": lang}
-    except (FileNotFoundError, ET.ParseError):
-        return {"language": "en"} # Default to English
+        config["language"] = root.find("language").text
+        config["extensions"] = root.find("supported_extensions").text
+    except (FileNotFoundError, ET.ParseError, AttributeError):
+        # If file or tags are missing, defaults are used
+        pass
+    return config
 
-def save_configuration(language_code):
-    """Saves the selected language to config.xml."""
+def save_configuration(language_code, extensions_string):
+    """Saves the configuration to config.xml after sanitizing inputs."""
     config_path = os.path.join(get_script_directory(), CONFIG_FILE)
-    root = ET.Element("config", version="1.0")
+    root = ET.Element("config", version="1.1")
+    
+    # Save language
     lang_element = ET.SubElement(root, "language")
     lang_element.text = language_code
+    
+    # Sanitize and save extensions
+    sanitized_extensions = sanitize_extensions(extensions_string)
+    ext_element = ET.SubElement(root, "supported_extensions")
+    ext_element.text = sanitized_extensions
+    
     tree = ET.ElementTree(root)
     tree.write(config_path, encoding="utf-8", xml_declaration=True)
 
+def sanitize_extensions(ext_string):
+    """Cleans and validates the user-provided extension string."""
+    if not ext_string:
+        return DEFAULT_EXTENSIONS
+    
+    # Split, strip whitespace, remove leading dots, filter out empty strings
+    extensions = [ext.strip().lstrip('.') for ext in ext_string.lower().split(',')]
+    valid_extensions = [ext for ext in extensions if ext]
+    
+    if not valid_extensions:
+        return DEFAULT_EXTENSIONS
+        
+    return ",".join(valid_extensions)
+
 # --- Language Management ---
 class LanguageManager:
+    # ... (class is unchanged)
     def __init__(self, language_code):
         self.strings = {}
         self.load_language(language_code)
@@ -68,12 +94,11 @@ class LanguageManager:
                 self.strings = {"app_title": "Error: Language file not found"}
 
     def get(self, key, **kwargs):
-        """Gets a string by key and formats it if necessary."""
         return self.strings.get(key, key).format(**kwargs)
 
 # --- Core Logic ---
 def gather_files_back(folder_to_process, progress_callback=None):
-    """Gathers files from subfolders back to the main folder and removes empty subfolders."""
+    # ... (function is unchanged)
     stats = {
         "moved_count": 0,
         "deleted_folders": 0,
@@ -111,13 +136,13 @@ def gather_files_back(folder_to_process, progress_callback=None):
             
     return stats
 
-def process_directory(folder_to_process, inhibit_move_unrated, progress_callback=None):
+def process_directory(folder_to_process, supported_extensions, inhibit_move_unrated, progress_callback=None):
     """
-    Analyzes a folder, reads ratings and labels from XMP files, and moves the
-    corresponding ARW and XMP files into subfolders.
+    Analyzes a folder for files with supported extensions, reads their XMP metadata,
+    and moves them accordingly.
     """
     stats = {
-        "total_arw": 0,
+        "total_images": 0,
         "processed_count": 0,
         "moved_to_missing": 0,
         "intentionally_ignored": 0,
@@ -131,23 +156,24 @@ def process_directory(folder_to_process, inhibit_move_unrated, progress_callback
         stats["errors"].append("The specified folder does not exist.")
         return stats
 
-    arw_files = {}
+    image_files = {}
     xmp_files = {}
+    supported_ext_tuple = tuple(f".{ext}" for ext in supported_extensions.split(','))
 
     for filename in os.listdir(folder_to_process):
-        if filename.lower().endswith(".arw"):
+        if filename.lower().endswith(supported_ext_tuple):
             base_name, _ = os.path.splitext(filename)
-            arw_files[base_name] = os.path.join(folder_to_process, filename)
+            image_files[base_name] = os.path.join(folder_to_process, filename)
         elif filename.lower().endswith(".xmp"):
             base_name, _ = os.path.splitext(filename)
             xmp_files[base_name] = os.path.join(folder_to_process, filename)
 
-    stats["total_arw"] = len(arw_files)
+    stats["total_images"] = len(image_files)
     missing_folder = os.path.join(folder_to_process, "RATING_MISSING")
 
-    for i, (base_name, arw_path) in enumerate(arw_files.items()):
+    for i, (base_name, image_path) in enumerate(image_files.items()):
         if progress_callback:
-            progress_callback(i + 1, stats["total_arw"])
+            progress_callback(i + 1, stats["total_images"])
 
         is_rated = False
         rating_value = None
@@ -164,14 +190,12 @@ def process_directory(folder_to_process, inhibit_move_unrated, progress_callback
                     rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
                     label_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
 
-                    # A file is considered rated if it has a rating > 0 or a label other than 'None'
-                    if (rating_value and rating_value != '0') or \
-                       (label_value and label_value.lower() != 'none'):
+                    if (rating_value and rating_value != '0') or (label_value and label_value.lower() != 'none'):
                         is_rated = True
 
             except (FileNotFoundError, ET.ParseError) as e:
                 stats["errors"].append(f"Error processing {os.path.basename(xmp_path)}: {e}")
-                is_rated = False # Treat as unrated if XMP is broken
+                is_rated = False
         
         if is_rated:
             folder_parts = []
@@ -184,14 +208,13 @@ def process_directory(folder_to_process, inhibit_move_unrated, progress_callback
             destination_folder = os.path.join(folder_to_process, subfolder_name)
             os.makedirs(destination_folder, exist_ok=True)
             
-            shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+            shutil.move(image_path, os.path.join(destination_folder, os.path.basename(image_path)))
             if base_name in xmp_files:
                 shutil.move(xmp_files[base_name], os.path.join(destination_folder, os.path.basename(xmp_files[base_name])))
             
             stats["processed_count"] += 1
             stats["folder_distribution"][subfolder_name] += 1
         else:
-            # File is unrated (no XMP, or XMP has rating 0 and label None)
             if base_name not in xmp_files:
                 stats["unclassified_no_xmp"] += 1
             else:
@@ -202,7 +225,7 @@ def process_directory(folder_to_process, inhibit_move_unrated, progress_callback
                 continue
             
             os.makedirs(missing_folder, exist_ok=True)
-            shutil.move(arw_path, os.path.join(missing_folder, os.path.basename(arw_path)))
+            shutil.move(image_path, os.path.join(missing_folder, os.path.basename(image_path)))
             if base_name in xmp_files:
                 shutil.move(xmp_files[base_name], os.path.join(missing_folder, os.path.basename(xmp_files[base_name])))
             stats["moved_to_missing"] += 1
@@ -211,6 +234,7 @@ def process_directory(folder_to_process, inhibit_move_unrated, progress_callback
 
 # --- UI Classes ---
 class ReportWindow(tk.Toplevel):
+    # ... (class is unchanged)
     def __init__(self, parent, title, report_string):
         super().__init__(parent)
         self.title(title)
@@ -245,56 +269,69 @@ class ReportWindow(tk.Toplevel):
         ok_button.pack()
 
 class ConfigWindow(tk.Toplevel):
-    def __init__(self, parent, lang_manager):
+    def __init__(self, parent, lang_manager, current_config):
         super().__init__(parent)
         self.master = parent
         self.lang_manager = lang_manager
         self.title(lang_manager.get("config_window_title"))
-        self.geometry("400x150")
+        self.geometry("450x200")
         self.resizable(False, False)
         self.transient(parent)
 
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill="both", expand=True)
 
-        label = ttk.Label(main_frame, text=lang_manager.get("config_language_label"))
-        label.pack(pady=5)
+        # Language selection
+        lang_label = ttk.Label(main_frame, text=lang_manager.get("config_language_label"))
+        lang_label.pack(pady=(0,5), anchor="w")
 
         self.lang_var = tk.StringVar()
         self.lang_combo = ttk.Combobox(main_frame, textvariable=self.lang_var, state="readonly")
-        self.lang_combo.pack(pady=5, fill="x")
+        self.lang_combo.pack(pady=(0,10), fill="x")
 
-        self.populate_languages()
+        # Extensions input
+        ext_label = ttk.Label(main_frame, text=lang_manager.get("config_extensions_label"))
+        ext_label.pack(pady=(10,5), anchor="w")
+
+        self.ext_var = tk.StringVar()
+        self.ext_entry = ttk.Entry(main_frame, textvariable=self.ext_var)
+        self.ext_entry.pack(pady=(0,10), fill="x")
+
+        self.populate_fields(current_config)
 
         save_button = ttk.Button(main_frame, text=lang_manager.get("config_save_button"), command=self.save_and_restart)
         save_button.pack(pady=10)
 
-    def populate_languages(self):
+    def populate_fields(self, current_config):
+        # Populate languages
         lang_dir = os.path.join(get_script_directory(), "lang")
         try:
             languages = [f.split('.')[0] for f in os.listdir(lang_dir) if f.endswith('.json')]
             self.lang_combo['values'] = languages
-            current_lang = load_configuration()['language']
-            if current_lang in languages:
-                self.lang_combo.set(current_lang)
+            self.lang_var.set(current_config['language'])
         except FileNotFoundError:
             self.lang_combo['values'] = ['en']
-            self.lang_combo.set('en')
+            self.lang_var.set('en')
+        
+        # Populate extensions
+        self.ext_var.set(current_config['extensions'])
 
     def save_and_restart(self):
         selected_lang = self.lang_var.get()
-        if selected_lang:
-            save_configuration(selected_lang)
-            messagebox.showinfo(self.lang_manager.get("config_window_title"), self.lang_manager.get("config_restart_notice"))
-            subprocess.Popen([sys.executable] + sys.argv)
-            self.master.destroy()
+        extensions_str = self.ext_var.get()
+        
+        save_configuration(selected_lang, extensions_str)
+        messagebox.showinfo(self.lang_manager.get("config_window_title"), self.lang_manager.get("config_restart_notice"))
+        subprocess.Popen([sys.executable] + sys.argv)
+        self.master.destroy()
 
 class ImageProcessorUI:
-    def __init__(self, master, lang_manager, initial_folder=None):
+    def __init__(self, master, lang_manager, config, initial_folder=None):
         self.master = master
         self.lang = lang_manager
+        self.config = config
         master.title(self.lang.get("app_title"))
-        master.geometry("800x280") # Increased height for the new checkbox
+        master.geometry("800x240")
         master.resizable(False, False)
 
         self.folder_path = tk.StringVar()
@@ -329,26 +366,15 @@ class ImageProcessorUI:
         self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(5,0))
 
-        # --- Options Frame ---
         options_frame = ttk.Frame(master, padding=(10,0,10,10))
         options_frame.grid(row=2, column=0, sticky="w")
         
-        self.gather_checkbox = ttk.Checkbutton(
-            options_frame, 
-            text=self.lang.get("gather_checkbox_label"), 
-            variable=self.gather_mode,
-            command=self.toggle_options
-        )
+        self.gather_checkbox = ttk.Checkbutton(options_frame, text=self.lang.get("gather_checkbox_label"), variable=self.gather_mode, command=self.toggle_options)
         self.gather_checkbox.pack(side="top", anchor="w")
 
-        self.inhibit_move_checkbox = ttk.Checkbutton(
-            options_frame, 
-            text=self.lang.get("inhibit_move_checkbox_label"), 
-            variable=self.inhibit_move_mode
-        )
+        self.inhibit_move_checkbox = ttk.Checkbutton(options_frame, text=self.lang.get("inhibit_move_checkbox_label"), variable=self.inhibit_move_mode)
         self.inhibit_move_checkbox.pack(side="top", anchor="w", pady=(5,0))
 
-        # --- Main Buttons ---
         button_frame = ttk.Frame(master, padding="10")
         button_frame.grid(row=3, column=0, sticky="ew")
         button_frame.columnconfigure(0, weight=1)
@@ -368,14 +394,13 @@ class ImageProcessorUI:
         master.columnconfigure(0, weight=1)
 
     def toggle_options(self):
-        """Disables the 'inhibit move' checkbox if 'gather mode' is active."""
         if self.gather_mode.get():
             self.inhibit_move_checkbox.config(state="disabled")
         else:
             self.inhibit_move_checkbox.config(state="normal")
 
     def open_config(self):
-        ConfigWindow(self.master, self.lang)
+        ConfigWindow(self.master, self.lang, self.config)
 
     def browse_folder(self):
         initial_dir = os.path.join(os.path.expanduser("~"), "Pictures")
@@ -405,16 +430,16 @@ class ImageProcessorUI:
             args = (folder_to_process,)
         else:
             target_function = self.run_processing_logic
-            args = (folder_to_process, self.inhibit_move_mode.get())
+            args = (folder_to_process, self.config['extensions'], self.inhibit_move_mode.get())
 
         self.processing_thread = threading.Thread(target=target_function, args=args)
         self.processing_thread.start()
 
-    def run_processing_logic(self, folder_path, inhibit_move):
+    def run_processing_logic(self, folder_path, extensions, inhibit_move):
         def progress_handler(current, total):
             self.master.after(0, self.update_progress, current, total)
 
-        result_stats = process_directory(folder_path, inhibit_move, progress_handler)
+        result_stats = process_directory(folder_path, extensions, inhibit_move, progress_handler)
         self.master.after(0, self.on_processing_complete, result_stats)
 
     def run_gather_logic(self, folder_path):
@@ -435,7 +460,7 @@ class ImageProcessorUI:
         self.reset_ui_state()
         report = []
         report.append(self.lang.get("report_header"))
-        report.append(self.lang.get("report_total_arw", count=stats['total_arw']))
+        report.append(self.lang.get("report_total_arw", count=stats['total_images']))
         report.append(self.lang.get("report_moved_rated", count=stats['processed_count']))
         report.append(self.lang.get("report_moved_missing", count=stats['moved_to_missing']))
         if stats['intentionally_ignored'] > 0:
@@ -474,13 +499,12 @@ class ImageProcessorUI:
         ReportWindow(self.master, self.lang.get("gather_report_title"), "\n".join(report))
 
     def reset_ui_state(self):
-        """Resets the UI to its initial, ready state after an operation."""
         self.button_process.config(state="normal")
         self.button_browse.config(state="normal")
         self.button_config.config(state="normal")
         self.gather_checkbox.config(state="normal")
         self.inhibit_move_checkbox.config(state="normal")
-        self.toggle_options() # Ensure inhibit checkbox is correctly enabled/disabled
+        self.toggle_options()
         self.progress_bar["value"] = 100
         self.status_label.config(text=self.lang.get("status_complete"))
         self.master.after(2000, lambda: self.status_label.config(text=self.lang.get("status_ready")))
@@ -498,5 +522,5 @@ if __name__ == "__main__":
     style = ttk.Style(root)
     style.theme_use('vista')
     
-    ui = ImageProcessorUI(root, lang_manager, initial_folder)
+    ui = ImageProcessorUI(root, lang_manager, config, initial_folder)
     root.mainloop()
