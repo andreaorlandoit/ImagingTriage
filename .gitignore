@@ -361,6 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-/elabora_arw/build/elabora_arw
-/elabora_arw/dist
-/ImagingTriage/build/imaging_triage
+
+# PyInstaller build directories
+build/
+dist/
