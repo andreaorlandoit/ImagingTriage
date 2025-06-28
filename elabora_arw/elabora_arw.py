@@ -35,6 +35,7 @@ def process_directory(folder_to_process, progress_callback=None):
     stats = {
         "total_arw": 0,
         "processed_count": 0,
+        "moved_to_missing": 0,
         "no_xmp_found": 0,
         "no_rating_in_xmp": 0,
         "rating_distribution": defaultdict(int),
@@ -57,6 +58,7 @@ def process_directory(folder_to_process, progress_callback=None):
             xmp_files[base_name] = os.path.join(folder_to_process, filename)
 
     stats["total_arw"] = len(arw_files)
+    missing_rating_folder = os.path.join(folder_to_process, "RATING_MISSING")
 
     for i, (base_name, arw_path) in enumerate(arw_files.items()):
         if progress_callback:
@@ -64,6 +66,9 @@ def process_directory(folder_to_process, progress_callback=None):
 
         if base_name not in xmp_files:
             stats["no_xmp_found"] += 1
+            os.makedirs(missing_rating_folder, exist_ok=True)
+            shutil.move(arw_path, os.path.join(missing_rating_folder, os.path.basename(arw_path)))
+            stats["moved_to_missing"] += 1
             continue
 
         xmp_path = xmp_files[base_name]
@@ -72,20 +77,25 @@ def process_directory(folder_to_process, progress_callback=None):
             root = tree.getroot()
             rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
 
+            rating_value = None
             if rdf_description is not None:
                 rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
-                if rating_value is not None:
-                    subfolder_name = f"RATING_{rating_value}"
-                    destination_folder = os.path.join(folder_to_process, subfolder_name)
-                    os.makedirs(destination_folder, exist_ok=True)
-                    shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
-                    shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
-                    stats["processed_count"] += 1
-                    stats["rating_distribution"][rating_value] += 1
-                else:
-                    stats["no_rating_in_xmp"] += 1
+            
+            if rating_value is not None:
+                subfolder_name = f"RATING_{rating_value}"
+                destination_folder = os.path.join(folder_to_process, subfolder_name)
+                os.makedirs(destination_folder, exist_ok=True)
+                shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+                shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                stats["processed_count"] += 1
+                stats["rating_distribution"][rating_value] += 1
             else:
                 stats["no_rating_in_xmp"] += 1
+                os.makedirs(missing_rating_folder, exist_ok=True)
+                shutil.move(arw_path, os.path.join(missing_rating_folder, os.path.basename(arw_path)))
+                shutil.move(xmp_path, os.path.join(missing_rating_folder, os.path.basename(xmp_path)))
+                stats["moved_to_missing"] += 1
+
         except FileNotFoundError:
             stats["errors"].append(f"File XMP non trovato (dopo la scansione iniziale): {xmp_path}")
         except ET.ParseError:
@@ -197,7 +207,12 @@ class ImageProcessorUI:
         report = []
         report.append(f"--- Report Elaborazione ---")
         report.append(f"File ARW totali trovati: {stats['total_arw']}")
-        report.append(f"File spostati con successo: {stats['processed_count']}")
+        report.append(f"File spostati con rating: {stats['processed_count']}")
+        report.append(f"File spostati senza rating (in RATING_MISSING): {stats['moved_to_missing']}")
+        report.append("")
+        report.append("Dettaglio file ignorati o senza rating:")
+        report.append(f"  - Senza .XMP corrispondente: {stats['no_xmp_found']}")
+        report.append(f"  - Con .XMP ma senza tag Rating: {stats['no_rating_in_xmp']}")
         report.append("")
         report.append("Distribuzione Rating:")
         if stats['rating_distribution']:
@@ -205,9 +220,6 @@ class ImageProcessorUI:
                 report.append(f"  - Rating '{rating}': {count} file")
         else:
             report.append("  - Nessun file con rating è stato spostato.")
-        report.append("")
-        report.append(f"File ARW senza .XMP corrispondente: {stats['no_xmp_found']}")
-        report.append(f"File con .XMP ma senza rating: {stats['no_rating_in_xmp']}")
 
         if stats["errors"]:
             report.append("\n--- Errori ---")
