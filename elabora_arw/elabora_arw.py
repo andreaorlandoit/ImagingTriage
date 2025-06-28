@@ -61,9 +61,11 @@ class LanguageManager:
             with open(lang_file, 'r', encoding='utf-8') as f:
                 self.strings = json.load(f)
         except FileNotFoundError:
+            # Fallback to English if the selected language is not found
             if language_code != 'en':
                 self.load_language('en')
             else:
+                # If English is also missing, use emergency fallback strings
                 self.strings = {"app_title": "Error: Language file not found"}
 
     def get(self, key, **kwargs):
@@ -72,6 +74,18 @@ class LanguageManager:
 
 # --- Core Logic ---
 def process_directory(folder_to_process, progress_callback=None):
+    """
+    Analyzes a folder, reads ratings and labels from XMP files, and moves the
+    corresponding ARW and XMP files into subfolders.
+
+    Args:
+        folder_to_process (str): The path of the folder to process.
+        progress_callback (function, optional): A function to call for each file analyzed
+                                             to report progress.
+
+    Returns:
+        dict: A dictionary containing detailed statistics of the operation.
+    """
     stats = {
         "total_arw": 0,
         "processed_count": 0,
@@ -89,6 +103,7 @@ def process_directory(folder_to_process, progress_callback=None):
     arw_files = {}
     xmp_files = {}
 
+    # Scan the folder for .ARW and .XMP files
     for filename in os.listdir(folder_to_process):
         if filename.lower().endswith(".arw"):
             base_name, _ = os.path.splitext(filename)
@@ -100,10 +115,12 @@ def process_directory(folder_to_process, progress_callback=None):
     stats["total_arw"] = len(arw_files)
     missing_folder = os.path.join(folder_to_process, "RATING_MISSING")
 
+    # Process each found ARW file
     for i, (base_name, arw_path) in enumerate(arw_files.items()):
         if progress_callback:
             progress_callback(i + 1, stats["total_arw"])
 
+        # Case 1: No matching .XMP file found
         if base_name not in xmp_files:
             stats["unclassified_no_xmp"] += 1
             os.makedirs(missing_folder, exist_ok=True)
@@ -111,6 +128,7 @@ def process_directory(folder_to_process, progress_callback=None):
             stats["moved_to_missing"] += 1
             continue
 
+        # Case 2: .XMP file exists, proceed to parse it
         xmp_path = xmp_files[base_name]
         try:
             tree = ET.parse(xmp_path)
@@ -123,12 +141,14 @@ def process_directory(folder_to_process, progress_callback=None):
                 rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
                 label_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
 
+            # Build the destination folder name based on found metadata
             folder_parts = []
             if rating_value:
                 folder_parts.append(f"RATING_{rating_value}")
             if label_value:
                 folder_parts.append(f"LABEL_{label_value}")
 
+            # If any metadata was found, move to a specific folder
             if folder_parts:
                 subfolder_name = "-".join(folder_parts)
                 destination_folder = os.path.join(folder_to_process, subfolder_name)
@@ -140,6 +160,7 @@ def process_directory(folder_to_process, progress_callback=None):
                 stats["processed_count"] += 1
                 stats["folder_distribution"][subfolder_name] += 1
             else:
+                # Case 3: .XMP exists but contains no rating or label
                 stats["unclassified_no_metadata"] += 1
                 os.makedirs(missing_folder, exist_ok=True)
                 shutil.move(arw_path, os.path.join(missing_folder, os.path.basename(arw_path)))
@@ -180,6 +201,7 @@ class ConfigWindow(tk.Toplevel):
         save_button.pack(pady=10)
 
     def populate_languages(self):
+        """Scans the lang folder and populates the combobox with available languages."""
         lang_dir = os.path.join(get_script_directory(), "lang")
         try:
             languages = [f.split('.')[0] for f in os.listdir(lang_dir) if f.endswith('.json')]
@@ -192,11 +214,13 @@ class ConfigWindow(tk.Toplevel):
             self.lang_combo.set('en')
 
     def save_and_restart(self):
+        """Saves the selected language and safely restarts the application."""
         selected_lang = self.lang_var.get()
         if selected_lang:
             save_configuration(selected_lang)
             messagebox.showinfo(self.lang_manager.get("config_window_title"), self.lang_manager.get("config_restart_notice"))
             
+            # Safely restart the application, handling paths with spaces
             subprocess.Popen([sys.executable] + sys.argv)
             self.master.destroy()
 
@@ -215,6 +239,7 @@ class ImageProcessorUI:
         self.processing_thread = None
 
         # --- UI Widgets ---
+        # Row 0: Input Frame
         input_frame = ttk.Frame(master, padding="10")
         input_frame.grid(row=0, column=0, sticky="ew")
         input_frame.columnconfigure(1, weight=1)
@@ -228,6 +253,7 @@ class ImageProcessorUI:
         self.button_browse = ttk.Button(input_frame, text=self.lang.get("browse_button"), command=self.browse_folder)
         self.button_browse.grid(row=0, column=2, padx=(5, 0), pady=5, sticky="e")
 
+        # Row 1: Progress Frame
         progress_frame = ttk.Frame(master, padding="10")
         progress_frame.grid(row=1, column=0, sticky="ew")
         progress_frame.columnconfigure(0, weight=1)
@@ -238,6 +264,7 @@ class ImageProcessorUI:
         self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(5,0))
 
+        # Row 2: Button Frame
         button_frame = ttk.Frame(master, padding="10")
         button_frame.grid(row=2, column=0, sticky="ew")
         button_frame.columnconfigure(0, weight=1)
@@ -257,15 +284,18 @@ class ImageProcessorUI:
         master.columnconfigure(0, weight=1)
 
     def open_config(self):
+        """Opens the configuration window."""
         ConfigWindow(self.master, self.lang)
 
     def browse_folder(self):
+        """Opens a dialog to select a folder to process."""
         initial_dir = os.path.join(os.path.expanduser("~"), "Pictures")
         folder_selected = filedialog.askdirectory(initialdir=initial_dir)
         if folder_selected:
             self.folder_path.set(folder_selected)
 
     def start_processing(self):
+        """Starts the file processing in a separate thread."""
         if self.processing_thread and self.processing_thread.is_alive():
             messagebox.showwarning(self.lang.get("app_title"), self.lang.get("warning_already_running"))
             return
@@ -275,6 +305,7 @@ class ImageProcessorUI:
             messagebox.showerror(self.lang.get("app_title"), self.lang.get("error_folder_not_exists"))
             return
 
+        # Disable buttons during processing
         self.button_process.config(state="disabled")
         self.button_browse.config(state="disabled")
         self.button_config.config(state="disabled")
@@ -287,6 +318,7 @@ class ImageProcessorUI:
         self.processing_thread.start()
 
     def run_processing_logic(self, folder_path):
+        """Runs the core logic and notifies the UI thread with the result."""
         def progress_handler(current, total):
             self.master.after(0, self.update_progress, current, total)
 
@@ -294,6 +326,7 @@ class ImageProcessorUI:
         self.master.after(0, self.on_processing_complete, result_stats)
 
     def update_progress(self, current, total):
+        """Updates the progress bar and status label. Called from the UI thread."""
         if total > 0:
             percentage = (current / total) * 100
             self.progress_bar["value"] = percentage
@@ -301,12 +334,15 @@ class ImageProcessorUI:
         self.master.update_idletasks()
 
     def on_processing_complete(self, stats):
+        """Handles the results after processing is finished. Called from the UI thread."""
+        # Re-enable buttons
         self.button_process.config(state="normal")
         self.button_browse.config(state="normal")
         self.button_config.config(state="normal")
         self.progress_bar["value"] = 100
         self.status_label.config(text=self.lang.get("status_complete"))
 
+        # Build the final report string
         report = []
         report.append(self.lang.get("report_header"))
         report.append(self.lang.get("report_total_arw", count=stats['total_arw']))
@@ -329,11 +365,13 @@ class ImageProcessorUI:
             report.append(self.lang.get("report_errors_header"))
             report.append(error_list)
         
+        # Display the final report
         messagebox.showinfo(self.lang.get("report_title"), "\n".join(report))
         self.status_label.config(text=self.lang.get("status_ready"))
         self.progress_bar["value"] = 0
 
 if __name__ == "__main__":
+    # Application entry point
     config = load_configuration()
     lang_manager = LanguageManager(config['language'])
 
@@ -341,6 +379,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         initial_folder = sys.argv[1]
 
+    # Create and run the main application window
     root = tk.Tk()
     style = ttk.Style(root)
     style.theme_use('vista')
