@@ -2,15 +2,15 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>33f706d2-65cb-4b80-9956-87cbf027af6d</ProjectGuid>
+    <ProjectGuid>{F213B123-C123-4D12-B123-A12345678901}</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>elabora_arw.py</StartupFile>
+    <StartupFile>imaging_triage.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
-    <Name>elabora_arw</Name>
-    <RootNamespace>elabora_arw</RootNamespace>
+    <Name>ImagingTriage</Name>
+    <RootNamespace>ImagingTriage</RootNamespace>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>

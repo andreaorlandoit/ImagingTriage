@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Program Name: elabora_arw.py
+
+Program Name: ImagingTriage
 Version: 2025-06-27
 Author: Andrea Orlando
 Purpose: This script analyzes a folder containing image files and their .XMP sidecars,
          extracts rating and color label metadata, and moves the files into
          subfolders. It supports configurable file types.
 License: GPLv3
-"""
+
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk

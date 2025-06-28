@@ -1,1 +1,1 @@
-c:\Users\Utente\AppData\Local\Programs\Python\Python313\Scripts\pyinstaller.exe -i C:\Users\Utente\source\repos\elabora_arw\elabora_arw\elabora_arw.ico C:\Users\Utente\source\repos\elabora_arw\elabora_arw\elabora_arw.py --onefile --noconsole
+c:\Users\Utente\AppData\Local\Programs\Python\Python313\Scripts\pyinstaller.exe -i C:\Users\Utente\source\repos\ImagingTriage\ImagingTriage\ImagingTriage.ico C:\Users\Utente\source\repos\ImagingTriage\ImagingTriage\imaging_triage.py --onefile --noconsole
