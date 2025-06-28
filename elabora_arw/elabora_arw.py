@@ -12,33 +12,42 @@ Licenza: GPLv3
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import os
 import xml.etree.ElementTree as ET
 import shutil
 import sys
+import threading
+from collections import defaultdict
 
-def process_directory(folder_to_process):
+def process_directory(folder_to_process, progress_callback=None):
     """
     Analizza una cartella, legge i rating dai file XMP e sposta i file ARW e XMP
     corrispondenti in sottocartelle basate sul rating.
 
     Args:
         folder_to_process (str): Il percorso della cartella da elaborare.
+        progress_callback (function, optional): Funzione da chiamare per ogni file analizzato.
 
     Returns:
-        dict: Un dizionario con i risultati dell'elaborazione.
-              Contiene "processed_count", "errors" e un messaggio di riepilogo.
+        dict: Un dizionario con le statistiche dettagliate dell'elaborazione.
     """
+    stats = {
+        "total_arw": 0,
+        "processed_count": 0,
+        "no_xmp_found": 0,
+        "no_rating_in_xmp": 0,
+        "rating_distribution": defaultdict(int),
+        "errors": []
+    }
+
     if not os.path.isdir(folder_to_process):
-        return {"processed_count": 0, "errors": ["La cartella specificata non esiste."], "message": "Errore: cartella non trovata."}
+        stats["errors"].append("La cartella specificata non esiste.")
+        return stats
 
     arw_files = {}
     xmp_files = {}
-    errors = []
-    processed_count = 0
 
-    # Scansiona la cartella per file .ARW e .XMP
     for filename in os.listdir(folder_to_process):
         if filename.lower().endswith(".arw"):
             base_name, _ = os.path.splitext(filename)
@@ -47,61 +56,95 @@ def process_directory(folder_to_process):
             base_name, _ = os.path.splitext(filename)
             xmp_files[base_name] = os.path.join(folder_to_process, filename)
 
-    for base_name, arw_path in arw_files.items():
-        if base_name in xmp_files:
-            xmp_path = xmp_files[base_name]
-            try:
-                tree = ET.parse(xmp_path)
-                root = tree.getroot()
-                rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+    stats["total_arw"] = len(arw_files)
 
-                if rdf_description is not None:
-                    rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
-                    if rating_value is not None:
-                        subfolder_name = f"RATING_{rating_value}"
-                        destination_folder = os.path.join(folder_to_process, subfolder_name)
-                        os.makedirs(destination_folder, exist_ok=True)
-                        shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
-                        shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
-                        processed_count += 1
-            except FileNotFoundError:
-                errors.append(f"File XMP non trovato: {xmp_path}")
-            except ET.ParseError:
-                errors.append(f"Errore di parsing nel file XMP: {xmp_path}")
+    for i, (base_name, arw_path) in enumerate(arw_files.items()):
+        if progress_callback:
+            progress_callback(i + 1, stats["total_arw"])
 
-    message = f"Elaborazione completata. Spostati {processed_count} file ARW."
-    return {"processed_count": processed_count, "errors": errors, "message": message}
+        if base_name not in xmp_files:
+            stats["no_xmp_found"] += 1
+            continue
+
+        xmp_path = xmp_files[base_name]
+        try:
+            tree = ET.parse(xmp_path)
+            root = tree.getroot()
+            rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+
+            if rdf_description is not None:
+                rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
+                if rating_value is not None:
+                    subfolder_name = f"RATING_{rating_value}"
+                    destination_folder = os.path.join(folder_to_process, subfolder_name)
+                    os.makedirs(destination_folder, exist_ok=True)
+                    shutil.move(arw_path, os.path.join(destination_folder, os.path.basename(arw_path)))
+                    shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                    stats["processed_count"] += 1
+                    stats["rating_distribution"][rating_value] += 1
+                else:
+                    stats["no_rating_in_xmp"] += 1
+            else:
+                stats["no_rating_in_xmp"] += 1
+        except FileNotFoundError:
+            stats["errors"].append(f"File XMP non trovato (dopo la scansione iniziale): {xmp_path}")
+        except ET.ParseError:
+            stats["errors"].append(f"Errore di parsing nel file XMP: {xmp_path}")
+
+    return stats
 
 
 class ImageProcessorUI:
     def __init__(self, master, initial_folder=None):
         self.master = master
-        master.title("Elabora Immagini ARW :: Suddivisione in sotto-cartelle per Rating")
-        master.geometry("800x120")
+        master.title("Elabora Immagini ARW :: Suddivisione per Rating")
+        master.geometry("800x200")
         master.resizable(False, False)
 
         self.folder_path = tk.StringVar()
         if initial_folder:
             self.folder_path.set(initial_folder)
+        
+        self.processing_thread = None
 
-        # Riga 1: Label, Entry, Button
-        self.label_folder = tk.Label(master, text="Cartella da elaborare:")
-        self.label_folder.grid(row=0, column=0, padx=5, pady=10, sticky="w")
+        # --- UI Widgets ---
+        # Riga 0: Frame per input
+        input_frame = ttk.Frame(master, padding="10")
+        input_frame.grid(row=0, column=0, sticky="ew")
+        input_frame.columnconfigure(1, weight=1)
 
-        self.entry_folder = tk.Entry(master, textvariable=self.folder_path, width=60)
-        self.entry_folder.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
+        self.label_folder = ttk.Label(input_frame, text="Cartella da elaborare:")
+        self.label_folder.grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
 
-        self.button_browse = tk.Button(master, text="Sfoglia...", command=self.browse_folder)
-        self.button_browse.grid(row=0, column=2, padx=5, pady=10, sticky="e")
+        self.entry_folder = ttk.Entry(input_frame, textvariable=self.folder_path, width=80)
+        self.entry_folder.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        # Riga 2: Buttons
-        self.button_process = tk.Button(master, text="Elabora", command=self.process_folder)
-        self.button_process.grid(row=1, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
+        self.button_browse = ttk.Button(input_frame, text="Sfoglia...", command=self.browse_folder)
+        self.button_browse.grid(row=0, column=2, padx=(5, 0), pady=5, sticky="e")
 
-        self.button_cancel = tk.Button(master, text="Annulla", command=master.quit)
-        self.button_cancel.grid(row=1, column=2, padx=5, pady=10, sticky="ew")
+        # Riga 1: Frame per progress bar
+        progress_frame = ttk.Frame(master, padding="10")
+        progress_frame.grid(row=1, column=0, sticky="ew")
+        progress_frame.columnconfigure(0, weight=1)
 
-        master.grid_columnconfigure(1, weight=1)
+        self.status_label = ttk.Label(progress_frame, text="Pronto.")
+        self.status_label.grid(row=0, column=0, sticky="w")
+        
+        self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
+        self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(5,0))
+
+        # Riga 2: Frame per bottoni
+        button_frame = ttk.Frame(master, padding="10")
+        button_frame.grid(row=2, column=0, sticky="ew")
+        button_frame.columnconfigure(0, weight=1)
+
+        self.button_process = ttk.Button(button_frame, text="Elabora", command=self.start_processing)
+        self.button_process.grid(row=0, column=0, sticky="ew")
+
+        self.button_cancel = ttk.Button(button_frame, text="Esci", command=master.quit)
+        self.button_cancel.grid(row=0, column=1, sticky="e", padx=(10,0))
+
+        master.columnconfigure(0, weight=1)
 
     def browse_folder(self):
         initial_dir = os.path.join(os.path.expanduser("~"), "Pictures")
@@ -109,20 +152,72 @@ class ImageProcessorUI:
         if folder_selected:
             self.folder_path.set(folder_selected)
 
-    def process_folder(self):
+    def start_processing(self):
+        if self.processing_thread and self.processing_thread.is_alive():
+            messagebox.showwarning("Attenzione", "Un'elaborazione è già in corso.")
+            return
+
         folder_to_process = self.folder_path.get()
+        if not os.path.isdir(folder_to_process):
+            messagebox.showerror("Errore", "Selezionare una cartella valida.")
+            return
+
+        self.button_process.config(state="disabled")
+        self.button_browse.config(state="disabled")
+        self.progress_bar["value"] = 0
         
-        # Chiama la funzione logica separata
-        result = process_directory(folder_to_process)
+        self.processing_thread = threading.Thread(
+            target=self.run_processing_logic,
+            args=(folder_to_process,)
+        )
+        self.processing_thread.start()
 
-        # Gestisce gli errori e mostra un report
-        if result["errors"]:
-            error_message = "Si sono verificati i seguenti errori:\n\n" + "\n".join(result["errors"])
-            messagebox.showwarning("Errori durante l'elaborazione", error_message)
+    def run_processing_logic(self, folder_path):
+        """Esegue la logica in un thread separato e notifica la UI."""
+        def progress_handler(current, total):
+            self.master.after(0, self.update_progress, current, total)
 
-        # Mostra il messaggio di completamento
-        messagebox.showinfo("Completato", result["message"])
-        # self.master.destroy() # Commentato per permettere elaborazioni multiple
+        result_stats = process_directory(folder_path, progress_handler)
+        self.master.after(0, self.on_processing_complete, result_stats)
+
+    def update_progress(self, current, total):
+        if total > 0:
+            percentage = (current / total) * 100
+            self.progress_bar["value"] = percentage
+            self.status_label.config(text=f"Elaborazione: {current}/{total}...")
+        self.master.update_idletasks()
+
+    def on_processing_complete(self, stats):
+        self.button_process.config(state="normal")
+        self.button_browse.config(state="normal")
+        self.progress_bar["value"] = 100
+        self.status_label.config(text="Completato.")
+
+        # Costruisci il report finale
+        report = []
+        report.append(f"--- Report Elaborazione ---")
+        report.append(f"File ARW totali trovati: {stats['total_arw']}")
+        report.append(f"File spostati con successo: {stats['processed_count']}")
+        report.append("")
+        report.append("Distribuzione Rating:")
+        if stats['rating_distribution']:
+            for rating, count in sorted(stats['rating_distribution'].items()):
+                report.append(f"  - Rating '{rating}': {count} file")
+        else:
+            report.append("  - Nessun file con rating è stato spostato.")
+        report.append("")
+        report.append(f"File ARW senza .XMP corrispondente: {stats['no_xmp_found']}")
+        report.append(f"File con .XMP ma senza rating: {stats['no_rating_in_xmp']}")
+
+        if stats["errors"]:
+            report.append("\n--- Errori ---")
+            for error in stats["errors"]:
+                report.append(f"- {error}")
+        
+        messagebox.showinfo("Elaborazione Completata", "\n".join(report))
+        self.status_label.config(text="Pronto.")
+        self.progress_bar["value"] = 0
+
 
 if __name__ == "__main__":
     initial_folder = None
@@ -130,5 +225,9 @@ if __name__ == "__main__":
         initial_folder = sys.argv[1]
 
     root = tk.Tk()
+    # Usa i widget a tema di ttk per un look più moderno
+    style = ttk.Style(root)
+    style.theme_use('vista') # 'clam', 'alt', 'default', 'classic', 'vista', 'xpnative'
+    
     ui = ImageProcessorUI(root, initial_folder)
     root.mainloop()
