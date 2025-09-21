@@ -1,12 +1,12 @@
 # ImagingTriage
 
 ## Program Name: ImagingTriage
-**Version:** 2025-06-28.0
+**Version:** 2025-09-21.0
 **Author:** Andrea Orlando
-**Purpose:** This script analyzes a folder containing image files and their .XMP sidecars, extracts rating and color label metadata, and moves the files into subfolders. It supports configurable file types.
+**Purpose:** This script analyzes a folder containing image files and their metadata, extracts rating and color label metadata, and moves the files into subfolders. It supports configurable file types.
 
 ## Features:
-- Process images based on XMP metadata (ratings and labels).
+- Process images based on metadata (ratings and labels).
 - Organize files into subfolders based on extracted metadata.
 - Gather files back from subfolders to the main directory (undo operation).
 - Configurable supported file extensions (e.g., ARW, JPG, TIFF, HEIF).
@@ -20,7 +20,7 @@ This project is licensed under the GPLv3 License. See the `LICENSE` file for mor
 
 ### Prerequisites:
 - Python 3.x installed.
-- `PyInstaller` library installed (`pip install pyinstaller`).
+- "pyexiv2" Library installed.
 
 ### Running the Application:
 1.  **Clone the repository:**

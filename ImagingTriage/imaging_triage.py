@@ -3,18 +3,21 @@
 
 """
 Program Name: ImagingTriage
-Version: 2025-06-27
+Version: APP_VERSION
 Author: Andrea Orlando
-Purpose: This script analyzes a folder containing image files and their .XMP sidecars,
-         extracts rating and color label metadata, and moves the files into
-         subfolders. It supports configurable file types.
+Purpose: This script analyzes a folder containing image files, extracts rating
+         and color label metadata, and moves the files into subfolders. It
+         supports configurable file types and reads metadata directly from
+         the image files.
 License: GPLv3
 """
+
+# Importa la libreria per la gestione dei TAG EXIF.
+import pyexiv2
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import os
-import xml.etree.ElementTree as ET
 import shutil
 import sys
 import threading
@@ -22,11 +25,12 @@ import json
 import subprocess
 import webbrowser
 from collections import defaultdict
+import xml.etree.ElementTree as ET
 
 # --- Configuration Management ---
 CONFIG_FILE = "config.xml"
 DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
-APP_VERSION = "2025.06.28.0"
+APP_VERSION = "2025.09.21.0"
 
 def get_script_directory():
     """Returns the directory where the script is located, handling PyInstaller's _MEIPASS."""
@@ -36,13 +40,18 @@ def get_script_directory():
 
 def load_configuration():
     """Loads configuration from config.xml. Returns defaults if not found or invalid."""
-    config_path = os.path.join(get_script_directory(), CONFIG_FILE)
+    config_path = os.path.join(os.path.expanduser("~"), "Pictures", CONFIG_FILE)
     config = {"language": "en", "extensions": DEFAULT_EXTENSIONS}
     try:
         tree = ET.parse(config_path)
         root = tree.getroot()
-        config["language"] = root.find("language").text
-        config["extensions"] = root.find("supported_extensions").text
+        language_element = root.find("language")
+        extensions_element = root.find("supported_extensions")
+        
+        if language_element is not None:
+            config["language"] = language_element.text
+        if extensions_element is not None:
+            config["extensions"] = extensions_element.text
     except (FileNotFoundError, ET.ParseError, AttributeError):
         # If file or tags are missing, defaults are used
         pass
@@ -50,7 +59,8 @@ def load_configuration():
 
 def save_configuration(language_code, extensions_string):
     """Saves the configuration to config.xml after sanitizing inputs."""
-    config_path = os.path.join(get_script_directory(), CONFIG_FILE)
+    # Corretto il percorso del file di configurazione
+    config_path = os.path.join(os.path.expanduser("~"), "Pictures", CONFIG_FILE)
     root = ET.Element("config", version="1.1")
     
     # Save language
@@ -81,7 +91,6 @@ def sanitize_extensions(ext_string):
 
 # --- Language Management ---
 class LanguageManager:
-    # ... (class is unchanged)
     def __init__(self, language_code):
         self.strings = {}
         self.load_language(language_code)
@@ -102,7 +111,7 @@ class LanguageManager:
 
 # --- Core Logic ---
 def gather_files_back(folder_to_process, progress_callback=None):
-    # ... (function is unchanged)
+    # This function remains unchanged as it moves files back to the root.
     stats = {
         "moved_count": 0,
         "deleted_folders": 0,
@@ -150,7 +159,6 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
         "processed_count": 0,
         "moved_to_missing": 0,
         "intentionally_ignored": 0,
-        "unclassified_no_xmp": 0,
         "unclassified_no_metadata": 0,
         "folder_distribution": defaultdict(int),
         "errors": []
@@ -160,85 +168,83 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
         stats["errors"].append("The specified folder does not exist.")
         return stats
 
-    image_files = {}
-    xmp_files = {}
     supported_ext_tuple = tuple(f".{ext}" for ext in supported_extensions.split(','))
-
-    for filename in os.listdir(folder_to_process):
-        if filename.lower().endswith(supported_ext_tuple):
-            base_name, _ = os.path.splitext(filename)
-            image_files[base_name] = os.path.join(folder_to_process, filename)
-        elif filename.lower().endswith(".xmp"):
-            base_name, _ = os.path.splitext(filename)
-            xmp_files[base_name] = os.path.join(folder_to_process, filename)
-
-    stats["total_images"] = len(image_files)
+    
+    # Filter files based on supported extensions, excluding XMP files
+    all_files = [f for f in os.listdir(folder_to_process) if f.lower().endswith(supported_ext_tuple)]
+    
+    stats["total_images"] = len(all_files)
     missing_folder = os.path.join(folder_to_process, "RATING_MISSING")
 
-    for i, (base_name, image_path) in enumerate(image_files.items()):
+    for i, filename in enumerate(all_files):
         if progress_callback:
             progress_callback(i + 1, stats["total_images"])
 
-        is_rated = False
+        image_path = os.path.join(folder_to_process, filename)
         rating_value = None
         label_value = None
-
-        if base_name in xmp_files:
-            xmp_path = xmp_files[base_name]
-            try:
-                tree = ET.parse(xmp_path)
-                root = tree.getroot()
-                rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
-
-                if rdf_description is not None:
-                    rating_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
-                    label_value = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
-
-                    if (rating_value and rating_value != '0') or (label_value and label_value.lower() != 'none'):
-                        is_rated = True
-
-            except (FileNotFoundError, ET.ParseError) as e:
-                stats["errors"].append(f"Error processing {os.path.basename(xmp_path)}: {e}")
-                is_rated = False
         
-        if is_rated:
-            folder_parts = []
-            if rating_value and rating_value != '0':
-                folder_parts.append(f"RATING_{rating_value}")
-            if label_value and label_value.lower() != 'none':
-                folder_parts.append(f"LABEL_{label_value}")
+        try:
+            with pyexiv2.Image(image_path) as img:
+                metadata = img.read_xmp()
             
-            subfolder_name = "-".join(folder_parts)
-            destination_folder = os.path.join(folder_to_process, subfolder_name)
-            os.makedirs(destination_folder, exist_ok=True)
+            # Access the rating and label from the XMP dictionary
+            rating_value = metadata.get('Xmp.xmp.Rating')
+            label_value = metadata.get('Xmp.xmp.Label')
             
-            shutil.move(image_path, os.path.join(destination_folder, os.path.basename(image_path)))
-            if base_name in xmp_files:
-                shutil.move(xmp_files[base_name], os.path.join(destination_folder, os.path.basename(xmp_files[base_name])))
-            
-            stats["processed_count"] += 1
-            stats["folder_distribution"][subfolder_name] += 1
-        else:
-            if base_name not in xmp_files:
-                stats["unclassified_no_xmp"] += 1
+            is_rated = (rating_value is not None and rating_value != '0') or \
+                       (label_value is not None and label_value.lower() != 'none')
+
+            if is_rated:
+                folder_parts = []
+                if rating_value and rating_value != '0':
+                    folder_parts.append(f"RATING_{rating_value}")
+                if label_value and label_value.lower() != 'none':
+                    folder_parts.append(f"LABEL_{label_value}")
+                
+                subfolder_name = "-".join(folder_parts)
+                destination_folder = os.path.join(folder_to_process, subfolder_name)
+                os.makedirs(destination_folder, exist_ok=True)
+                
+                # Sposta l'immagine
+                shutil.move(image_path, os.path.join(destination_folder, os.path.basename(image_path)))
+
+                # Sposta il file XMP sidecar, se esiste
+                xmp_path = os.path.splitext(image_path)[0] + ".xmp"
+                if os.path.exists(xmp_path):
+                    shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                
+                stats["processed_count"] += 1
+                stats["folder_distribution"][subfolder_name] += 1
             else:
                 stats["unclassified_no_metadata"] += 1
 
-            if inhibit_move_unrated:
-                stats["intentionally_ignored"] += 1
-                continue
-            
-            os.makedirs(missing_folder, exist_ok=True)
-            shutil.move(image_path, os.path.join(missing_folder, os.path.basename(image_path)))
-            if base_name in xmp_files:
-                shutil.move(xmp_files[base_name], os.path.join(missing_folder, os.path.basename(xmp_files[base_name])))
-            stats["moved_to_missing"] += 1
+                if inhibit_move_unrated:
+                    stats["intentionally_ignored"] += 1
+                    continue
+                
+                os.makedirs(missing_folder, exist_ok=True)
+                shutil.move(image_path, os.path.join(missing_folder, os.path.basename(image_path)))
+                
+                # Sposta anche l'eventuale file XMP sidecar, se esiste
+                xmp_path = os.path.splitext(image_path)[0] + ".xmp"
+                if os.path.exists(xmp_path):
+                    shutil.move(xmp_path, os.path.join(missing_folder, os.path.basename(xmp_path)))
+
+                stats["moved_to_missing"] += 1
+
+        except pyexiv2.Image.ExifError as e:
+            stats["errors"].append(f"Skipping {filename} due to metadata error: {e}")
+            continue
+        except Exception as e:
+            stats["errors"].append(f"An unexpected error occurred with {filename}: {e}")
+            continue
 
     return stats
 
-# --- UI Classes ---
+
+# --- UI Classes (unchanged) ---
 class ReportWindow(tk.Toplevel):
-    # ... (class is unchanged)
     def __init__(self, parent, title, report_string):
         super().__init__(parent)
         self.title(title)
@@ -492,8 +498,7 @@ class ImageProcessorUI:
             report.append(self.lang.get("report_intentionally_ignored", count=stats['intentionally_ignored']))
         report.append("")
         report.append(self.lang.get("report_ignored_header"))
-        report.append(self.lang.get("report_ignored_no_xmp", count=stats['unclassified_no_xmp']))
-        report.append(self.lang.get("report_ignored_no_rating_tag", count=stats['unclassified_no_metadata']))
+        report.append(self.lang.get("report_ignored_no_metadata", count=stats['unclassified_no_metadata']))
         report.append("")
         report.append(self.lang.get("report_folder_distribution"))
         if stats['folder_distribution']:
