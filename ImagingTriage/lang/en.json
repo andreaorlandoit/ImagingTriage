@@ -10,7 +10,7 @@
   "status_complete": "Complete.",
   "report_title": "Processing Complete",
   "report_header": "--- Processing Report ---",
-  "report_total_arw": "Total ARW files found: {count}",
+  "report_total_image": "Total image files found: {count}",
   "report_moved_rated": "Files moved to specific folders: {count}",
   "report_moved_missing": "Files moved to RATING_MISSING: {count}",
   "report_folder_distribution": "Folder Distribution:",

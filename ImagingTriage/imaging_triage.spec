@@ -3,10 +3,10 @@
 
 a = Analysis(
     ['imaging_triage.py'],
-    pathex=[],
+    pathex=['C:\\Users\\Utente\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-package'],
     binaries=[],
     datas=[('lang', 'lang'), ('docs', 'docs')],
-    hiddenimports=[],
+    hiddenimports=['pyexiv2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

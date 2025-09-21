@@ -10,7 +10,7 @@
   "status_complete": "Completato.",
   "report_title": "Elaborazione Completata",
   "report_header": "--- Report Elaborazione ---",
-  "report_total_arw": "File ARW totali trovati: {count}",
+  "report_total_image": "File immagine totali trovati: {count}",
   "report_moved_rated": "File spostati in cartelle specifiche: {count}",
   "report_moved_missing": "File spostati in RATING_MISSING: {count}",
   "report_folder_distribution": "Distribuzione Cartelle:",

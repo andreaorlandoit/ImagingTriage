@@ -491,7 +491,7 @@ class ImageProcessorUI:
         self.reset_ui_state()
         report = []
         report.append(self.lang.get("report_header"))
-        report.append(self.lang.get("report_total_arw", count=stats['total_images']))
+        report.append(self.lang.get("report_total_image", count=stats['total_images']))
         report.append(self.lang.get("report_moved_rated", count=stats['processed_count']))
         report.append(self.lang.get("report_moved_missing", count=stats['moved_to_missing']))
         if stats['intentionally_ignored'] > 0:
