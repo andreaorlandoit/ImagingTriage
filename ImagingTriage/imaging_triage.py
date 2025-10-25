@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 # --- Configuration Management ---
 CONFIG_FILE = "config.xml"
 DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
-APP_VERSION = "2025.09.21.0"
+APP_VERSION = "2025.10.25.0"
 
 def get_script_directory():
     """Returns the directory where the script is located, handling PyInstaller's _MEIPASS."""
@@ -149,7 +149,7 @@ def gather_files_back(folder_to_process, progress_callback=None):
             
     return stats
 
-def process_directory(folder_to_process, supported_extensions, inhibit_move_unrated, progress_callback=None):
+def process_directory(folder_to_process, supported_extensions, inhibit_move_unrated, progress_callback=None, lang_manager=None):
     """
     Analyzes a folder for files with supported extensions, reads their XMP metadata,
     and moves them accordingly.
@@ -164,8 +164,25 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
         "errors": []
     }
 
+    # small helper to use translations when available, otherwise fall back to English
+    def tr(key, **kwargs):
+        fallbacks = {
+            "error_folder_not_exists": "The specified folder does not exist.",
+            "error_file_not_found": "File not found: {filename}",
+            "error_cannot_read_file": "Cannot read file (permission denied): {filename}",
+            "error_metadata_read": "Skipping {filename} due to metadata read error: {error}",
+            "error_failed_move_sidecar": "Failed moving sidecar for {filename}: {error}",
+            "error_unexpected": "An unexpected error occurred with {filename}: {error}"
+        }
+        if lang_manager:
+            try:
+                return lang_manager.get(key, **kwargs)
+            except Exception:
+                pass
+        return fallbacks.get(key, key).format(**kwargs)
+
     if not os.path.isdir(folder_to_process):
-        stats["errors"].append("The specified folder does not exist.")
+        stats["errors"].append(tr("error_folder_not_exists"))
         return stats
 
     supported_ext_tuple = tuple(f".{ext}" for ext in supported_extensions.split(','))
@@ -184,16 +201,42 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
         rating_value = None
         label_value = None
         
+        # Basic filesystem checks
+        if not os.path.exists(image_path):
+            stats["errors"].append(tr("error_file_not_found", filename=filename))
+            continue
+        if not os.access(image_path, os.R_OK):
+            stats["errors"].append(tr("error_cannot_read_file", filename=filename))
+            continue
+
         try:
-            with pyexiv2.Image(image_path) as img:
-                metadata = img.read_xmp()
-            
-            # Access the rating and label from the XMP dictionary
-            rating_value = metadata.get('Xmp.xmp.Rating')
-            label_value = metadata.get('Xmp.xmp.Label')
-            
-            is_rated = (rating_value is not None and rating_value != '0') or \
-                       (label_value is not None and label_value.lower() != 'none')
+            # Open image and read XMP metadata; handle errors from pyexiv2 safely
+            try:
+                with pyexiv2.Image(image_path) as img:
+                    metadata = img.read_xmp() or {}
+            except Exception as e:
+                stats["errors"].append(tr("error_metadata_read", filename=filename, error=str(e)))
+                continue
+
+            # Normalize metadata values safely: Xmp keys may return lists/bytes/other types
+            def normalize(value):
+                if value is None:
+                    return None
+                if isinstance(value, (list, tuple)) and value:
+                    value = value[0]
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8', errors='replace')
+                    except Exception:
+                        value = str(value)
+                return str(value).strip()
+
+            rating_value = normalize(metadata.get('Xmp.xmp.Rating') or metadata.get('Xmp.Rating'))
+            label_value = normalize(metadata.get('Xmp.xmp.Label') or metadata.get('Xmp.Label'))
+
+            # Determine whether file is considered "rated"
+            is_rated = (rating_value is not None and rating_value != '' and rating_value != '0') or \
+                       (label_value is not None and label_value.lower() != 'none' and label_value != '')
 
             if is_rated:
                 folder_parts = []
@@ -202,17 +245,18 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
                 if label_value and label_value.lower() != 'none':
                     folder_parts.append(f"LABEL_{label_value}")
                 
-                subfolder_name = "-".join(folder_parts)
+                subfolder_name = "-".join(folder_parts) if folder_parts else "RATING_UNKNOWN"
                 destination_folder = os.path.join(folder_to_process, subfolder_name)
                 os.makedirs(destination_folder, exist_ok=True)
                 
-                # Sposta l'immagine
                 shutil.move(image_path, os.path.join(destination_folder, os.path.basename(image_path)))
 
-                # Sposta il file XMP sidecar, se esiste
                 xmp_path = os.path.splitext(image_path)[0] + ".xmp"
                 if os.path.exists(xmp_path):
-                    shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                    try:
+                        shutil.move(xmp_path, os.path.join(destination_folder, os.path.basename(xmp_path)))
+                    except Exception as e:
+                        stats["errors"].append(tr("error_failed_move_sidecar", filename=filename, error=str(e)))
                 
                 stats["processed_count"] += 1
                 stats["folder_distribution"][subfolder_name] += 1
@@ -226,18 +270,20 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
                 os.makedirs(missing_folder, exist_ok=True)
                 shutil.move(image_path, os.path.join(missing_folder, os.path.basename(image_path)))
                 
-                # Sposta anche l'eventuale file XMP sidecar, se esiste
                 xmp_path = os.path.splitext(image_path)[0] + ".xmp"
                 if os.path.exists(xmp_path):
-                    shutil.move(xmp_path, os.path.join(missing_folder, os.path.basename(xmp_path)))
+                    try:
+                        shutil.move(xmp_path, os.path.join(missing_folder, os.path.basename(xmp_path)))
+                    except Exception as e:
+                        stats["errors"].append(tr("error_failed_move_sidecar", filename=filename, error=str(e)))
 
                 stats["moved_to_missing"] += 1
 
         except pyexiv2.Image.ExifError as e:
-            stats["errors"].append(f"Skipping {filename} due to metadata error: {e}")
+            stats["errors"].append(tr("error_metadata_read", filename=filename, error=str(e)))
             continue
         except Exception as e:
-            stats["errors"].append(f"An unexpected error occurred with {filename}: {e}")
+            stats["errors"].append(tr("error_unexpected", filename=filename, error=str(e)))
             continue
 
     return stats
@@ -461,16 +507,16 @@ class ImageProcessorUI:
             args = (folder_to_process,)
         else:
             target_function = self.run_processing_logic
-            args = (folder_to_process, self.config['extensions'], self.inhibit_move_mode.get())
+            args = (folder_to_process, self.config['extensions'], self.inhibit_move_mode.get(), None, self.lang)
 
         self.processing_thread = threading.Thread(target=target_function, args=args)
         self.processing_thread.start()
 
-    def run_processing_logic(self, folder_path, extensions, inhibit_move):
+    def run_processing_logic(self, folder_path, extensions, inhibit_move, progress_callback=None, lang_manager=None):
         def progress_handler(current, total):
             self.master.after(0, self.update_progress, current, total)
 
-        result_stats = process_directory(folder_path, extensions, inhibit_move, progress_handler)
+        result_stats = process_directory(folder_path, extensions, inhibit_move, progress_handler, lang_manager)
         self.master.after(0, self.on_processing_complete, result_stats)
 
     def run_gather_logic(self, folder_path):

@@ -35,5 +35,10 @@
   "report_intentionally_ignored": "File lasciati intenzionalmente nella cartella: {count}",
   "config_extensions_label": "Estensioni file supportate (separate da virgola):",
   "help_button": "Guida",
-  "error_help_file_not_found": "File di guida non trovato: {filename}. Assicurati che esista nella cartella 'docs'."
+  "error_help_file_not_found": "File di guida non trovato: {filename}. Assicurati che esista nella cartella 'docs'.",
+  "error_file_not_found": "File non trovato: {filename}",
+  "error_cannot_read_file": "Impossibile leggere il file (permessi negati): {filename}",
+  "error_metadata_read": "Ignorato {filename} a causa di un errore nella lettura dei metadati: {error}",
+  "error_failed_move_sidecar": "Impossibile spostare il file sidecar per {filename}: {error}",
+  "error_unexpected": "Si è verificato un errore imprevisto con {filename}: {error}"
 }

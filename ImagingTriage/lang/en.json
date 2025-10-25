@@ -35,5 +35,10 @@
   "report_intentionally_ignored": "Files intentionally left in the main folder: {count}",
   "config_extensions_label": "Supported file extensions (comma-separated):",
   "help_button": "Help",
-  "error_help_file_not_found": "Help file not found: {filename}. Please ensure it exists in the 'docs' folder."
+  "error_help_file_not_found": "Help file not found: {filename}. Please ensure it exists in the 'docs' folder.",
+  "error_file_not_found": "File not found: {filename}",
+  "error_cannot_read_file": "Cannot read file (permission denied): {filename}",
+  "error_metadata_read": "Skipping {filename} due to metadata read error: {error}",
+  "error_failed_move_sidecar": "Failed moving sidecar for {filename}: {error}",
+  "error_unexpected": "An unexpected error occurred with {filename}: {error}"
 }
