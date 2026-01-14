@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 # --- Configuration Management ---
 CONFIG_FILE = "config.xml"
 DEFAULT_EXTENSIONS = "arw,arq,axr,jpg,jpeg,tif,tiff,heif"
-APP_VERSION = "2025.10.25.0"
+APP_VERSION = "2026.01.14.0"
 
 def get_script_directory():
     """Returns the directory where the script is located, handling PyInstaller's _MEIPASS."""
@@ -153,6 +153,7 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
     """
     Analyzes a folder for files with supported extensions, reads their XMP metadata,
     and moves them accordingly.
+    Tries to read metadata from embedded XMP first, then falls back to XMP sidecar files.
     """
     stats = {
         "total_images": 0,
@@ -210,13 +211,13 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
             continue
 
         try:
-            # Open image and read XMP metadata; handle errors from pyexiv2 safely
+            # STEP 1: Try to read XMP metadata embedded in the image file
             try:
                 with pyexiv2.Image(image_path) as img:
                     metadata = img.read_xmp() or {}
             except Exception as e:
-                stats["errors"].append(tr("error_metadata_read", filename=filename, error=str(e)))
-                continue
+                # If pyexiv2 fails, metadata will remain empty
+                metadata = {}
 
             # Normalize metadata values safely: Xmp keys may return lists/bytes/other types
             def normalize(value):
@@ -233,6 +234,32 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
 
             rating_value = normalize(metadata.get('Xmp.xmp.Rating') or metadata.get('Xmp.Rating'))
             label_value = normalize(metadata.get('Xmp.xmp.Label') or metadata.get('Xmp.Label'))
+
+            # STEP 2: If no metadata found embedded, try XMP sidecar file
+            if (rating_value is None or rating_value == '' or rating_value == '0') and \
+               (label_value is None or label_value == '' or label_value.lower() == 'none'):
+                
+                xmp_sidecar_path = os.path.splitext(image_path)[0] + ".xmp"
+                
+                if os.path.exists(xmp_sidecar_path):
+                    try:
+                        tree = ET.parse(xmp_sidecar_path)
+                        root = tree.getroot()
+                        rdf_description = root.find('.//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+
+                        if rdf_description is not None:
+                            sidecar_rating = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Rating')
+                            sidecar_label = rdf_description.get('{http://ns.adobe.com/xap/1.0/}Label')
+                            
+                            # Use sidecar values if they are meaningful
+                            if sidecar_rating and sidecar_rating != '0':
+                                rating_value = sidecar_rating
+                            if sidecar_label and sidecar_label.lower() != 'none':
+                                label_value = sidecar_label
+                                
+                    except (FileNotFoundError, ET.ParseError) as e:
+                        # Sidecar parsing failed, continue with embedded values (if any)
+                        pass
 
             # Determine whether file is considered "rated"
             is_rated = (rating_value is not None and rating_value != '' and rating_value != '0') or \
@@ -279,15 +306,11 @@ def process_directory(folder_to_process, supported_extensions, inhibit_move_unra
 
                 stats["moved_to_missing"] += 1
 
-        except pyexiv2.Image.ExifError as e:
-            stats["errors"].append(tr("error_metadata_read", filename=filename, error=str(e)))
-            continue
         except Exception as e:
             stats["errors"].append(tr("error_unexpected", filename=filename, error=str(e)))
             continue
 
     return stats
-
 
 # --- UI Classes (unchanged) ---
 class ReportWindow(tk.Toplevel):
